@@ -1,0 +1,1052 @@
+openapi: 3.0.3
+info:
+  title: Chat Application API
+  description: |
+    WebSocketチャットアプリケーションのAPI仕様書
+    
+    ## 通信方式
+    - **REST API**: グループ管理、メッセージ履歴、画像アップロード、**既読管理**、編集/削除
+    - **WebSocket (STOMP)**: リアルタイムメッセージング、入力中表示
+    
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:8080/v1
+    description: Development
+
+tags:
+  - name: Auth
+    description: 認証・ユーザー登録
+  - name: Messages
+    description: メッセージ送受信・編集・削除
+  - name: Groups
+    description: グループ管理
+  - name: Members
+    description: グループメンバー管理
+  - name: Images
+    description: 画像アップロード
+
+paths:
+  # ========================================
+  # 認証 (Auth)
+  # ========================================
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      summary: ユーザー登録
+      description: 新規ユーザーを作成し、トークンを発行する。
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: メールアドレスが既に使用されている
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: ログイン
+      description: メールアドレスとパスワードで認証し、トークンを発行する。
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: 認証失敗（パスワード不一致など）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: トークンリフレッシュ
+      description: |
+        有効期限切れのアクセストークンを更新する。
+        リフレッシュトークンを送信し、新しいアクセストークンを取得する。
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  description: ログイン時に取得したリフレッシュトークン
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: リフレッシュトークンが無効または期限切れ（再ログインが必要）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: ログアウト
+      description: リフレッシュトークンを無効化する。
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '204':
+          description: ログアウト成功
+
+  /auth/me:
+    get:
+      tags:
+        - Auth
+      summary: 自分の情報を取得
+      description: 現在のログインユーザーの詳細情報を取得する。アプリ起動時の初期化などに使用。
+      security:
+        - bearerAuth: []
+      operationId: getMe
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  # ========================================
+  # メッセージ関連
+  # ========================================
+  /groups/{groupId}/messages:
+    get:
+      tags:
+        - Messages
+      summary: メッセージ履歴取得
+      description: 指定グループのメッセージ履歴をページネーションで取得
+      operationId: getMessages
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+        - name: limit
+          in: query
+          description: 取得件数
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: before
+          in: query
+          description: このメッセージIDより前を取得（カーソルページネーション）
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags:
+        - Messages
+      summary: メッセージ送信（REST）
+      description: |
+        REST経由でメッセージを送信。
+        `temporaryId` を指定することで、リトライ時の二重送信を防ぎます。
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '201':
+          description: 送信成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /groups/{groupId}/messages/{messageId}:
+    patch:
+      tags:
+        - Messages
+      summary: メッセージ編集
+      description: |
+        自分のメッセージを編集する。
+        編集内容はWebSocket経由で `MessageEdited` として通知される。
+      operationId: editMessage
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+        - $ref: '#/components/parameters/messageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                  maxLength: 4000
+                  example: "修正したメッセージ内容"
+      responses:
+        '200':
+          description: 編集成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: 権限なし（他人のメッセージなど）
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Messages
+      summary: メッセージ削除
+      description: |
+        自分のメッセージを削除する（論理削除）。
+        削除イベントはWebSocket経由で `MessageDeleted` として通知される。
+      operationId: deleteMessage
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+        - $ref: '#/components/parameters/messageId'
+      responses:
+        '204':
+          description: 削除成功
+        '403':
+          description: 権限なし
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{groupId}/messages/{messageId}/read:
+    post:
+      tags:
+        - Messages
+      summary: 既読をつける
+      description: |
+        指定メッセージまでを既読にする。
+        ※WebSocketでのブロードキャストは行われないため、サーバー負荷が低い。
+      operationId: markAsRead
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+        - $ref: '#/components/parameters/messageId'
+      responses:
+        '200':
+          description: 既読更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{groupId}/read-status:
+    get:
+      tags:
+        - Messages
+      summary: 既読状態一覧取得
+      description: |
+        グループ内の各メンバーの既読位置を取得。
+        画面を開いた際や、定期的なポーリング（長めの間隔推奨）で使用する。
+      operationId: getReadStatus
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReadStatus'
+
+  # ========================================
+  # 画像アップロード
+  # ========================================
+  /groups/{groupId}/images:
+    post:
+      tags:
+        - Images
+      summary: 画像アップロード
+      description: |
+        画像をアップロードし、URLを取得。  
+        取得したURLをメッセージ送信時に `imageUrl` として指定。
+      operationId: uploadImage
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 画像ファイル（JPEG, PNG, GIF, WebP）
+            encoding:
+              file:
+                contentType: image/jpeg, image/png, image/gif, image/webp
+      responses:
+        '201':
+          description: アップロード成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageUploadResponse'
+        '400':
+          description: 不正なファイル形式
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: ファイルサイズ超過（上限10MB）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ========================================
+  # グループ管理
+  # ========================================
+  /groups:
+    get:
+      tags:
+        - Groups
+      summary: 参加グループ一覧取得
+      description: 自分が参加しているグループの一覧を取得
+      operationId: getGroups
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+
+    post:
+      tags:
+        - Groups
+      summary: グループ作成
+      description: 新しいグループを作成。作成者は自動的に管理者になる。
+      operationId: createGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+      responses:
+        '201':
+          description: 作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /groups/{groupId}:
+    get:
+      tags:
+        - Groups
+      summary: グループ詳細取得
+      operationId: getGroup
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - Groups
+      summary: グループ情報更新
+      description: グループ名やアイコンを更新（管理者のみ）
+      operationId: updateGroup
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGroupRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    delete:
+      tags:
+        - Groups
+      summary: グループ削除
+      description: グループを削除（管理者のみ）。全メッセージも削除される。
+      operationId: deleteGroup
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      responses:
+        '204':
+          description: 削除成功
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ========================================
+  # メンバー管理
+  # ========================================
+  /groups/{groupId}/members:
+    get:
+      tags:
+        - Members
+      summary: メンバー一覧取得
+      operationId: getMembers
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Member'
+
+  /groups/{groupId}/invitations:
+    post:
+      tags:
+        - Members
+      summary: メンバー招待
+      description: ユーザーをグループに招待（管理者のみ）
+      operationId: inviteMember
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteMemberRequest'
+      responses:
+        '201':
+          description: 招待成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '400':
+          description: 既に招待済み or メンバー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /groups/{groupId}/invitations/{invitationId}:
+    post:
+      tags:
+        - Members
+      summary: 招待に応答
+      description: 招待を承諾または拒否
+      operationId: respondToInvitation
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum: [accept, reject]
+      responses:
+        '200':
+          description: 応答成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{groupId}/members/{userId}:
+    delete:
+      tags:
+        - Members
+      summary: メンバー除外
+      description: メンバーをグループから除外（管理者のみ）。管理者自身は除外不可。
+      operationId: removeMember
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: 除外成功
+        '400':
+          description: 管理者は除外不可
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{groupId}/leave:
+    post:
+      tags:
+        - Members
+      summary: グループ退出
+      description: 自分でグループから退出。管理者が退出する場合は別の管理者を指名必須。
+      operationId: leaveGroup
+      parameters:
+        - $ref: '#/components/parameters/groupId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                newAdminUserId:
+                  type: string
+                  description: 管理者が退出する場合、新しい管理者のユーザーID
+      responses:
+        '204':
+          description: 退出成功
+        '400':
+          description: 管理者は新しい管理者を指名必須
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+# ========================================
+# コンポーネント定義
+# ========================================
+components:
+  parameters:
+    groupId:
+      name: groupId
+      in: path
+      required: true
+      description: グループID
+      schema:
+        type: string
+        example: "grp_abc123"
+
+    messageId:
+      name: messageId
+      in: path
+      required: true
+      description: メッセージID
+      schema:
+        type: string
+        example: "msg_xyz789"
+
+  schemas:
+    # ---------- ユーザー ----------
+    RegisterRequest:
+      type: object
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          maxLength: 50
+          example: "田中太郎"
+        email:
+          type: string
+          format: email
+          example: "tanaka@example.com"
+        password:
+          type: string
+          minLength: 8
+          format: password
+          example: "Pass1234!"
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "tanaka@example.com"
+        password:
+          type: string
+          format: password
+          example: "Pass1234!"
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/UserDetail'
+        tokens:
+          $ref: '#/components/schemas/TokenResponse'
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: APIアクセスおよびWebSocket接続用 (通常 有効期限15分〜1時間)
+          example: "eyJhbGciOiJIUzI1Ni..."
+        refreshToken:
+          type: string
+          description: アクセストークン再発行用 (通常 有効期限7日〜30日)
+          example: "dGhpcy1pcy1hLXJlZnJlc2..."
+        expiresIn:
+          type: integer
+          description: アクセストークンの有効秒数
+          example: 3600
+
+    UserDetail:
+      allOf:
+        - $ref: '#/components/schemas/UserSummary'
+        - type: object
+          properties:
+            email:
+              type: string
+              format: email
+              example: "tanaka@example.com"
+            createdAt:
+              type: string
+              format: date-time
+            status:
+              type: string
+              enum: [active, suspended]
+              example: "active"
+
+    # ---------- メッセージ ----------
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "msg_xyz789"
+        groupId:
+          type: string
+          example: "grp_abc123"
+        sender:
+          $ref: '#/components/schemas/UserSummary'
+        content:
+          type: string
+          example: "こんにちは！"
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://cdn.example.com/images/abc123.jpg"
+        messageType:
+          type: string
+          enum: [text, image, system]
+          example: "text"
+        isEdited:
+          type: boolean
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 編集された場合の日時
+
+    SendMessageRequest:
+      type: object
+      required:
+        - content
+      properties:
+        temporaryId:
+          type: string
+          description: クライアント側で生成した一意なID（冪等性確保用）
+          example: "tmp_550e8400-e29b-41d4-a716-446655440000"
+        content:
+          type: string
+          maxLength: 4000
+          example: "こんにちは！"
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: 画像URL（事前にアップロードして取得）
+
+    MessageListResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        hasMore:
+          type: boolean
+          example: true
+        nextCursor:
+          type: string
+          nullable: true
+          example: "msg_abc123"
+
+    # ---------- 既読 ----------
+    ReadStatus:
+      type: object
+      properties:
+        userId:
+          type: string
+          example: "usr_123"
+        userName:
+          type: string
+          example: "田中太郎"
+        lastReadMessageId:
+          type: string
+          example: "msg_xyz789"
+        lastReadAt:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:35:00Z"
+
+    # ---------- 画像 ----------
+    ImageUploadResponse:
+      type: object
+      properties:
+        imageId:
+          type: string
+          example: "img_abc123"
+        imageUrl:
+          type: string
+          format: uri
+          example: "https://cdn.example.com/images/abc123.jpg"
+        thumbnailUrl:
+          type: string
+          format: uri
+          example: "https://cdn.example.com/images/abc123_thumb.jpg"
+
+    # ---------- グループ ----------
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "grp_abc123"
+        name:
+          type: string
+          example: "プロジェクトA"
+        iconUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://cdn.example.com/icons/grp_abc123.jpg"
+        memberCount:
+          type: integer
+          example: 5
+        unreadCount:
+          type: integer
+          example: 3
+        lastMessage:
+          $ref: '#/components/schemas/Message'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    GroupDetail:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          properties:
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/Member'
+
+    CreateGroupRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          example: "プロジェクトA"
+        iconUrl:
+          type: string
+          format: uri
+          nullable: true
+        initialMemberIds:
+          type: array
+          items:
+            type: string
+          description: 初期メンバーのユーザーID（任意）
+          example: ["usr_456", "usr_789"]
+
+    UpdateGroupRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        iconUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    # ---------- メンバー ----------
+    Member:
+      type: object
+      properties:
+        userId:
+          type: string
+          example: "usr_123"
+        userName:
+          type: string
+          example: "田中太郎"
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        role:
+          type: string
+          enum: [admin, member]
+          example: "admin"
+        joinedAt:
+          type: string
+          format: date-time
+
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "usr_123"
+        name:
+          type: string
+          example: "田中太郎"
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    # ---------- 招待 ----------
+    InviteMemberRequest:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: string
+          description: 招待するユーザーID
+          example: "usr_456"
+        message:
+          type: string
+          maxLength: 500
+          description: 招待メッセージ（任意）
+          example: "プロジェクトAに参加しませんか？"
+
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "inv_abc123"
+        groupId:
+          type: string
+          example: "grp_abc123"
+        groupName:
+          type: string
+          example: "プロジェクトA"
+        invitedBy:
+          $ref: '#/components/schemas/UserSummary'
+        invitedUser:
+          $ref: '#/components/schemas/UserSummary'
+        message:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, accepted, rejected, expired]
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    # ---------- エラー ----------
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "INVALID_REQUEST"
+        message:
+          type: string
+          example: "リクエストが不正です"
+        details:
+          type: object
+          additionalProperties: true
+
+  responses:
+    Unauthorized:
+      description: 認証が必要、またはトークンが無効
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "UNAUTHORIZED"
+            message: "アクセストークンの有効期限が切れています"
+
+    BadRequest:
+      description: リクエストが不正
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: 権限なし
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "FORBIDDEN"
+            message: "この操作を行う権限がありません"
+
+    NotFound:
+      description: リソースが見つからない
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: "NOT_FOUND"
+            message: "指定されたリソースが見つかりません"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT認証トークン
+
+security:
+  - bearerAuth: []

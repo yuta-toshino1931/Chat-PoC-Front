@@ -1,0 +1,639 @@
+asyncapi: 3.0.0
+info:
+  title: Chat Application WebSocket API
+  version: 1.0.0
+  description: |
+    WebSocketチャットアプリケーションのリアルタイム通信仕様書
+    
+    ## 概要
+    STOMP over WebSocketプロトコルを使用したリアルタイムメッセージング。
+    
+    ## 認証
+    接続時に以下のいずれかの方法で認証:
+    - **クエリパラメータ**: `wss://example.com/api/ws?token={JWT}`
+    - **STOMPヘッダー**: CONNECTフレームに `Authorization: Bearer {JWT}`
+    
+    ## 接続フロー
+    1. WebSocket接続を確立
+    2. STOMP CONNECTフレームを送信（認証情報含む）
+    3. STOMP CONNECTEDフレームを受信
+    4. 必要なトピックをSUBSCRIBE
+    5. メッセージの送受信開始
+
+servers:
+  production:
+    host: api.example.com
+    pathname: /ws
+    protocol: wss
+    description: 本番環境
+    security:
+      - $ref: '#/components/securitySchemes/bearerAuth'
+
+  development:
+    host: localhost:8080
+    pathname: /ws
+    protocol: ws
+    description: 開発環境
+
+defaultContentType: application/json
+
+channels:
+  # ========================================
+  # メッセージ
+  # ========================================
+  groupMessages:
+    address: /topic/group/{groupId}
+    description: グループのメッセージを受信
+    parameters:
+      groupId:
+        $ref: '#/components/parameters/groupId'
+    messages:
+      messageReceived:
+        $ref: '#/components/messages/MessageReceived'
+      messageDeleted:
+        $ref: '#/components/messages/MessageDeleted'
+      messageEdited:
+        $ref: '#/components/messages/MessageEdited'
+
+  sendMessage:
+    address: /app/chat.send
+    description: メッセージを送信
+    messages:
+      sendMessage:
+        $ref: '#/components/messages/SendMessage'
+
+  # ========================================
+  # 入力中通知
+  # ========================================
+  groupTyping:
+    address: /topic/group/{groupId}/typing
+    description: グループの入力中通知を受信
+    parameters:
+      groupId:
+        $ref: '#/components/parameters/groupId'
+    messages:
+      typingNotification:
+        $ref: '#/components/messages/TypingNotification'
+
+  sendTyping:
+    address: /app/chat.typing
+    description: 入力中通知を送信
+    messages:
+      sendTyping:
+        $ref: '#/components/messages/SendTyping'
+
+  # ========================================
+  # オンライン状態（プレゼンス）
+  # ========================================
+  groupPresence:
+    address: /topic/group/{groupId}/presence
+    description: グループメンバーのオンライン状態を受信
+    parameters:
+      groupId:
+        $ref: '#/components/parameters/groupId'
+    messages:
+      presenceUpdate:
+        $ref: '#/components/messages/PresenceUpdate'
+
+  sendPresence:
+    address: /app/chat.presence
+    description: 自分のオンライン状態を更新
+    messages:
+      sendPresence:
+        $ref: '#/components/messages/SendPresence'
+
+  # ========================================
+  # 個人通知
+  # ========================================
+  userNotifications:
+    address: /user/queue/notifications
+    description: 個人宛の通知を受信（招待、メンションなど）
+    messages:
+      invitationReceived:
+        $ref: '#/components/messages/InvitationReceived'
+      mentionReceived:
+        $ref: '#/components/messages/MentionReceived'
+      groupUpdated:
+        $ref: '#/components/messages/GroupUpdated'
+
+operations:
+  # ========================================
+  # Subscribe（受信）操作
+  # ========================================
+  onMessageReceived:
+    action: receive
+    channel:
+      $ref: '#/channels/groupMessages'
+    summary: メッセージ受信
+    description: |
+      グループに新しいメッセージが投稿された時に受信。
+      購読前にREST APIで履歴を取得し、その後WebSocketで新着を受信する。
+
+  onTypingNotification:
+    action: receive
+    channel:
+      $ref: '#/channels/groupTyping'
+    summary: 入力中通知受信
+    description: |
+      他のメンバーが入力中の状態を受信。
+      `isTyping: false` または5秒間更新がない場合は入力終了とみなす。
+
+  onPresenceUpdate:
+    action: receive
+    channel:
+      $ref: '#/channels/groupPresence'
+    summary: オンライン状態受信
+    description: |
+      グループメンバーのオンライン状態変更を受信。
+      - `online`: アクティブに接続中
+      - `away`: 接続中だが非アクティブ（5分間操作なし）
+      - `offline`: 切断済み
+
+  onUserNotification:
+    action: receive
+    channel:
+      $ref: '#/channels/userNotifications'
+    summary: 個人通知受信
+    description: 招待やメンションなど、個人宛の通知を受信。
+
+  # ========================================
+  # Publish（送信）操作
+  # ========================================
+  publishMessage:
+    action: send
+    channel:
+      $ref: '#/channels/sendMessage'
+    summary: メッセージ送信
+    description: グループにメッセージを送信。送信成功時は同じメッセージがgroupMessagesチャンネルで配信される。
+
+  publishTyping:
+    action: send
+    channel:
+      $ref: '#/channels/sendTyping'
+    summary: 入力中通知送信
+    description: |
+      入力開始時に `isTyping: true`、入力終了時に `isTyping: false` を送信。
+      クライアントは300ms〜500msのデバウンス処理を推奨。
+
+  publishPresence:
+    action: send
+    channel:
+      $ref: '#/channels/sendPresence'
+    summary: オンライン状態送信
+    description: |
+      自分のオンライン状態を更新。
+      - 接続時に自動で `online` に設定
+      - 切断時に自動で `offline` に設定
+      - `away` は手動で設定（タブ非アクティブ時など）
+
+components:
+  parameters:
+    groupId:
+      description: グループID
+      examples: ["grp_abc123"]
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT認証トークン。
+        WebSocket接続時はクエリパラメータまたはSTOMPヘッダーで送信。
+
+  messages:
+    # ========================================
+    # メッセージ関連
+    # ========================================
+    SendMessage:
+      name: SendMessage
+      title: メッセージ送信
+      summary: グループにメッセージを送信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SendMessagePayload'
+
+    MessageReceived:
+      name: MessageReceived
+      title: メッセージ受信
+      summary: 新しいメッセージを受信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/Message'
+
+    MessageDeleted:
+      name: MessageDeleted
+      title: メッセージ削除通知
+      summary: メッセージが削除された通知
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MessageDeletedPayload'
+
+    MessageEdited:
+      name: MessageEdited
+      title: メッセージ編集通知
+      summary: メッセージが編集された通知
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/Message'
+
+    # ========================================
+    # 入力中通知
+    # ========================================
+    SendTyping:
+      name: SendTyping
+      title: 入力中通知送信
+      summary: 入力中状態を送信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SendTypingPayload'
+
+    TypingNotification:
+      name: TypingNotification
+      title: 入力中通知受信
+      summary: 他メンバーの入力中状態を受信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TypingEvent'
+
+    # ========================================
+    # オンライン状態（プレゼンス）
+    # ========================================
+    SendPresence:
+      name: SendPresence
+      title: オンライン状態送信
+      summary: 自分のオンライン状態を更新
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SendPresencePayload'
+
+    PresenceUpdate:
+      name: PresenceUpdate
+      title: オンライン状態受信
+      summary: メンバーのオンライン状態変更を受信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PresenceEvent'
+
+    # ========================================
+    # 個人通知
+    # ========================================
+    InvitationReceived:
+      name: InvitationReceived
+      title: 招待受信
+      summary: グループへの招待を受信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/InvitationNotification'
+
+    MentionReceived:
+      name: MentionReceived
+      title: メンション受信
+      summary: メッセージでメンションされた通知
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MentionNotification'
+
+    GroupUpdated:
+      name: GroupUpdated
+      title: グループ更新通知
+      summary: 参加グループの情報更新通知
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/GroupUpdateNotification'
+
+  schemas:
+    # ========================================
+    # 送信ペイロード（クライアント → サーバー）
+    # ========================================
+    SendMessagePayload:
+      type: object
+      required:
+        - groupId
+        - content
+      properties:
+        groupId:
+          type: string
+          description: 送信先グループID
+          example: "grp_abc123"
+        temporaryId:
+          type: string
+          description: クライアント側で生成した一意なID（冪等性確保用）
+          example: "tmp_550e8400-e29b-41d4-a716-446655440000"
+        content:
+          type: string
+          maxLength: 4000
+          description: メッセージ本文
+          example: "こんにちは！"
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: 画像URL（事前にアップロードして取得）
+          example: "https://cdn.example.com/images/abc123.jpg"
+        replyToMessageId:
+          type: string
+          nullable: true
+          description: リプライ元メッセージID
+          example: "msg_reply123"
+        mentions:
+          type: array
+          items:
+            type: string
+          description: メンションするユーザーIDの配列
+          example: ["usr_456", "usr_789"]
+
+    SendTypingPayload:
+      type: object
+      required:
+        - groupId
+        - isTyping
+      properties:
+        groupId:
+          type: string
+          description: グループID
+          example: "grp_abc123"
+        isTyping:
+          type: boolean
+          description: 入力中かどうか
+          example: true
+
+    SendPresencePayload:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [online, away]
+          description: |
+            オンライン状態
+            - `online`: アクティブ
+            - `away`: 離席中
+          example: "online"
+        groupIds:
+          type: array
+          items:
+            type: string
+          description: 状態を通知するグループID（省略時は全参加グループ）
+          example: ["grp_abc123", "grp_def456"]
+
+    # ========================================
+    # 受信ペイロード（サーバー → クライアント）
+    # ========================================
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          description: メッセージID
+          example: "msg_xyz789"
+        groupId:
+          type: string
+          description: グループID
+          example: "grp_abc123"
+        sender:
+          $ref: '#/components/schemas/UserSummary'
+        content:
+          type: string
+          description: メッセージ本文
+          example: "こんにちは！"
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: 画像URL
+          example: "https://cdn.example.com/images/abc123.jpg"
+        messageType:
+          type: string
+          enum: [text, image, system]
+          description: メッセージ種別
+          example: "text"
+        replyTo:
+          $ref: '#/components/schemas/ReplyToMessage'
+        mentions:
+          type: array
+          items:
+            type: string
+          description: メンションされたユーザーID
+          example: ["usr_456"]
+        isEdited:
+          type: boolean
+          description: 編集済みかどうか
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          description: 作成日時
+          example: "2025-01-15T10:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 更新日時（編集時）
+          example: "2025-01-15T10:35:00Z"
+
+    ReplyToMessage:
+      type: object
+      nullable: true
+      description: リプライ元メッセージの要約
+      properties:
+        id:
+          type: string
+          example: "msg_reply123"
+        content:
+          type: string
+          description: 元メッセージの本文（100文字で切り捨て）
+          example: "昨日の会議の件ですが..."
+        sender:
+          $ref: '#/components/schemas/UserSummary'
+
+    MessageDeletedPayload:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 削除されたメッセージID
+          example: "msg_xyz789"
+        groupId:
+          type: string
+          description: グループID
+          example: "grp_abc123"
+        deletedBy:
+          $ref: '#/components/schemas/UserSummary'
+        deletedAt:
+          type: string
+          format: date-time
+          example: "2025-01-15T11:00:00Z"
+
+    TypingEvent:
+      type: object
+      properties:
+        groupId:
+          type: string
+          description: グループID
+          example: "grp_abc123"
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        isTyping:
+          type: boolean
+          description: 入力中かどうか
+          example: true
+        timestamp:
+          type: string
+          format: date-time
+          description: イベント発生日時
+          example: "2025-01-15T10:30:00Z"
+
+    PresenceEvent:
+      type: object
+      properties:
+        groupId:
+          type: string
+          description: グループID
+          example: "grp_abc123"
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        status:
+          type: string
+          enum: [online, away, offline]
+          description: |
+            オンライン状態
+            - `online`: アクティブに接続中
+            - `away`: 接続中だが非アクティブ
+            - `offline`: 切断済み
+          example: "online"
+        lastActiveAt:
+          type: string
+          format: date-time
+          description: 最終アクティブ日時
+          example: "2025-01-15T10:30:00Z"
+
+    # ========================================
+    # 個人通知
+    # ========================================
+    InvitationNotification:
+      type: object
+      properties:
+        type:
+          type: string
+          const: "invitation"
+          example: "invitation"
+        invitation:
+          type: object
+          properties:
+            id:
+              type: string
+              example: "inv_abc123"
+            groupId:
+              type: string
+              example: "grp_abc123"
+            groupName:
+              type: string
+              example: "プロジェクトA"
+            invitedBy:
+              $ref: '#/components/schemas/UserSummary'
+            message:
+              type: string
+              nullable: true
+              example: "プロジェクトAに参加しませんか？"
+            expiresAt:
+              type: string
+              format: date-time
+              example: "2025-01-22T10:30:00Z"
+        receivedAt:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00Z"
+
+    MentionNotification:
+      type: object
+      properties:
+        type:
+          type: string
+          const: "mention"
+          example: "mention"
+        groupId:
+          type: string
+          example: "grp_abc123"
+        groupName:
+          type: string
+          example: "プロジェクトA"
+        message:
+          $ref: '#/components/schemas/Message'
+        receivedAt:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00Z"
+
+    GroupUpdateNotification:
+      type: object
+      properties:
+        type:
+          type: string
+          const: "group_updated"
+          example: "group_updated"
+        groupId:
+          type: string
+          example: "grp_abc123"
+        updateType:
+          type: string
+          enum: [name_changed, icon_changed, member_joined, member_left, member_removed]
+          description: 更新種別
+          example: "member_joined"
+        details:
+          type: object
+          additionalProperties: true
+          description: 更新内容の詳細
+          example:
+            newMember:
+              id: "usr_456"
+              name: "山田花子"
+        receivedAt:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00Z"
+
+    # ========================================
+    # 共通スキーマ
+    # ========================================
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          description: ユーザーID
+          example: "usr_123"
+        name:
+          type: string
+          description: ユーザー名
+          example: "田中太郎"
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: アバター画像URL
+          example: "https://cdn.example.com/avatars/usr_123.jpg"
+
+    # ========================================
+    # エラー
+    # ========================================
+    WebSocketError:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: エラーコード
+          example: 4003
+        type:
+          type: string
+          enum: [AUTH_ERROR, FORBIDDEN, NOT_FOUND, RATE_LIMITED, INVALID_PAYLOAD, SERVER_ERROR]
+          example: "FORBIDDEN"
+        message:
+          type: string
+          description: エラーメッセージ
+          example: "このグループへのアクセス権がありません"
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
