@@ -13,10 +13,7 @@ info:
     name: API Support
 
 servers:
-  - url: https://api.example.com/v1
-    description: Production
-  - url: http://localhost:8080/v1
-    description: Development
+  - url: http://localhost:8080
 
 tags:
   - name: Auth
@@ -165,6 +162,28 @@ paths:
                 $ref: '#/components/schemas/UserDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /invitations:
+    get:
+      tags:
+        - Members
+      summary: 自分への招待一覧取得
+      description: 現在のユーザーが受け取った招待（未応答のもの）を一覧取得する。
+      security:
+        - bearerAuth: []
+      operationId: getMyInvitations
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   # ========================================
   # メッセージ関連
   # ========================================
@@ -756,6 +775,14 @@ components:
           type: string
           enum: [text, image, system]
           example: "text"
+        replyTo:
+          $ref: '#/components/schemas/ReplyToMessage'
+        mentions:
+          type: array
+          items:
+            type: string
+          description: メンションされたユーザーID
+          example: ["usr_456"]
         isEdited:
           type: boolean
           example: false
@@ -768,6 +795,21 @@ components:
           format: date-time
           nullable: true
           description: 編集された場合の日時
+
+    ReplyToMessage:
+      type: object
+      nullable: true
+      description: リプライ元メッセージの要約
+      properties:
+        id:
+          type: string
+          example: "msg_reply123"
+        content:
+          type: string
+          description: 元メッセージの本文（100文字で切り捨て）
+          example: "昨日の会議の件ですが..."
+        sender:
+          $ref: '#/components/schemas/UserSummary'
 
     SendMessageRequest:
       type: object
@@ -787,6 +829,17 @@ components:
           format: uri
           nullable: true
           description: 画像URL（事前にアップロードして取得）
+        replyToMessageId:
+          type: string
+          nullable: true
+          description: リプライ元メッセージID
+          example: "msg_reply123"
+        mentions:
+          type: array
+          items:
+            type: string
+          description: メンションするユーザーIDの配列
+          example: ["usr_456", "usr_789"]
 
     MessageListResponse:
       type: object
@@ -948,12 +1001,13 @@ components:
     InviteMemberRequest:
       type: object
       required:
-        - userId
+        - email
       properties:
-        userId:
+        email:
           type: string
-          description: 招待するユーザーID
-          example: "usr_456"
+          format: email
+          description: 招待するユーザーのメールアドレス
+          example: "user@example.com"
         message:
           type: string
           maxLength: 500

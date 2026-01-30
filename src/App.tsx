@@ -5,12 +5,16 @@ import {
   Navigate,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { ChatProvider } from "./contexts/ChatContext";
 import Layout from "./components/Layout";
-import Dashboard from "./pages/Dashboard";
-import Sample from "./pages/Sample";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
-import Chat from "./pages/Chat";
+import Register from "./pages/Register";
+import Groups from "./pages/Groups";
+import GroupChat from "./pages/GroupChat";
+import GroupSettings from "./pages/GroupSettings";
+import GroupMembers from "./pages/GroupMembers";
+import Notifications from "./pages/Notifications";
 import { useEffect } from "react";
 
 // 認証が必要なページをラップするコンポーネント
@@ -23,9 +27,8 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
           <p className="text-gray-600">読み込み中...</p>
-          <p className="text-sm text-blue-600 mt-2">(デモモード)</p>
         </div>
       </div>
     );
@@ -75,36 +78,87 @@ const AppContent: React.FC = () => {
       document.head.appendChild(meta);
     }
 
-    // デモモード用のページタイトル設定
-    document.title = "サンプルアプリ - ログイン認証デモ";
+    // ページタイトル設定
+    document.title = "チャットアプリ";
   }, []);
 
   return (
     <Routes>
-      {/* ログイン画面 */}
+      {/* 認証不要のページ */}
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
-      {/* 認証が必要なページ */}
+      {/* デフォルトルートをグループ一覧にリダイレクト */}
       <Route
         path="/"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Dashboard />
-            </Layout>
+            <Navigate to="/groups" replace />
           </ProtectedRoute>
         }
       />
+
+      {/* グループ一覧 */}
       <Route
-        path="/sample"
+        path="/groups"
         element={
           <ProtectedRoute>
             <Layout>
-              <Sample />
+              <Groups />
             </Layout>
           </ProtectedRoute>
         }
       />
+
+      {/* グループ詳細（チャット） */}
+      <Route
+        path="/groups/:groupId"
+        element={
+          <ProtectedRoute>
+            <Layout fullWidth>
+              <GroupChat />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* グループ設定 */}
+      <Route
+        path="/groups/:groupId/settings"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <GroupSettings />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* グループメンバー管理 */}
+      <Route
+        path="/groups/:groupId/members"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <GroupMembers />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 通知 */}
+      <Route
+        path="/notifications"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Notifications />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 個人設定 */}
       <Route
         path="/settings"
         element={
@@ -115,16 +169,9 @@ const AppContent: React.FC = () => {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/chat"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <Chat />
-            </Layout>
-          </ProtectedRoute>
-        }
-      />
+
+      {/* 404 - 未知のルートはグループ一覧にリダイレクト */}
+      <Route path="*" element={<Navigate to="/groups" replace />} />
     </Routes>
   );
 };
@@ -135,9 +182,11 @@ function App() {
 
   return (
     <AuthProvider>
-      <Router basename={basename}>
-        <AppContent />
-      </Router>
+      <ChatProvider>
+        <Router basename={basename}>
+          <AppContent />
+        </Router>
+      </ChatProvider>
     </AuthProvider>
   );
 }

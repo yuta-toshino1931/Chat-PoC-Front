@@ -103,6 +103,19 @@ channels:
         $ref: '#/components/messages/SendPresence'
 
   # ========================================
+  # 既読状態
+  # ========================================
+  groupReadStatus:
+    address: /topic/group/{groupId}/read
+    description: グループの既読状態を受信
+    parameters:
+      groupId:
+        $ref: '#/components/parameters/groupId'
+    messages:
+      readStatusUpdate:
+        $ref: '#/components/messages/ReadStatusUpdate'
+
+  # ========================================
   # 個人通知
   # ========================================
   userNotifications:
@@ -155,6 +168,15 @@ operations:
       $ref: '#/channels/userNotifications'
     summary: 個人通知受信
     description: 招待やメンションなど、個人宛の通知を受信。
+
+  onReadStatusUpdate:
+    action: receive
+    channel:
+      $ref: '#/channels/groupReadStatus'
+    summary: 既読状態受信
+    description: |
+      グループメンバーの既読状態変更を受信。
+      メンバーが既読をつけた際にリアルタイムで通知される。
 
   # ========================================
   # Publish（送信）操作
@@ -274,6 +296,17 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PresenceEvent'
+
+    # ========================================
+    # 既読状態
+    # ========================================
+    ReadStatusUpdate:
+      name: ReadStatusUpdate
+      title: 既読状態受信
+      summary: メンバーの既読状態変更を受信
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ReadStatusEvent'
 
     # ========================================
     # 個人通知
@@ -508,6 +541,31 @@ components:
           format: date-time
           description: 最終アクティブ日時
           example: "2025-01-15T10:30:00Z"
+
+    ReadStatusEvent:
+      type: object
+      properties:
+        groupId:
+          type: string
+          description: グループID
+          example: "grp_abc123"
+        userId:
+          type: string
+          description: 既読をつけたユーザーID
+          example: "usr_123"
+        userName:
+          type: string
+          description: ユーザー名
+          example: "田中太郎"
+        lastReadMessageId:
+          type: string
+          description: 最後に既読にしたメッセージID
+          example: "msg_xyz789"
+        lastReadAt:
+          type: string
+          format: date-time
+          description: 既読日時
+          example: "2025-01-15T10:35:00Z"
 
     # ========================================
     # 個人通知

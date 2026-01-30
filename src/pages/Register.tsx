@@ -1,46 +1,76 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
+import { AuthService, OpenAPI } from "../api";
 
-const Login = () => {
+const Register = () => {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
-  const { login } = useAuth();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
+
+    // 入力検証
+    if (!name) {
+      setError("名前を入力してください");
+      return;
+    }
+    if (!email) {
+      setError("メールアドレスを入力してください");
+      return;
+    }
+    if (!password) {
+      setError("パスワードを入力してください");
+      return;
+    }
+    if (password.length < 8) {
+      setError("パスワードは8文字以上で入力してください");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("パスワードが一致しません");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      // 入力検証
-      if (!email) {
-        setError("メールアドレスを入力してください");
-        setIsLoading(false);
-        return;
+      const response = await AuthService.register({
+        name,
+        email,
+        password,
+      });
+
+      // トークンを保存
+      if (response.tokens?.accessToken) {
+        localStorage.setItem("accessToken", response.tokens.accessToken);
+        // OpenAPIにトークンを設定
+        OpenAPI.TOKEN = response.tokens.accessToken;
+      }
+      if (response.tokens?.refreshToken) {
+        localStorage.setItem("refreshToken", response.tokens.refreshToken);
+      }
+      if (response.user) {
+        localStorage.setItem("user", JSON.stringify({
+          id: response.user.id || "",
+          name: response.user.name || "",
+          email: response.user.email || "",
+          avatarUrl: response.user.avatarUrl,
+          status: response.user.status,
+        }));
       }
 
-      if (!password) {
-        setError("パスワードを入力してください");
-        setIsLoading(false);
-        return;
-      }
-
-      // ログイン処理
-      const success = await login(email, password);
-
-      if (success) {
-        navigate("/groups");
-      } else {
-        setError("ログインに失敗しました。認証情報を確認してください。");
-      }
+      // ページ遷移（AuthProviderが初期化時にトークンを読み込む）
+      navigate("/groups");
     } catch (err) {
-      setError("ログイン処理中にエラーが発生しました。");
-      console.error("ログインエラー:", err);
+      console.error("登録エラー:", err);
+      setError("登録に失敗しました。入力内容を確認してください。");
     } finally {
       setIsLoading(false);
     }
@@ -51,10 +81,10 @@ const Login = () => {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            ログイン
+            新規登録
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            サンプルアプリへようこそ
+            アカウントを作成してチャットを始めましょう
           </p>
         </div>
 
@@ -86,6 +116,22 @@ const Login = () => {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
+              <label htmlFor="name" className="sr-only">
+                名前
+              </label>
+              <input
+                id="name"
+                name="name"
+                type="text"
+                autoComplete="name"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="名前"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div>
               <label htmlFor="email-address" className="sr-only">
                 メールアドレス
               </label>
@@ -95,7 +141,7 @@ const Login = () => {
                 type="email"
                 autoComplete="email"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="メールアドレス"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -109,12 +155,28 @@ const Login = () => {
                 id="password"
                 name="password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete="new-password"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="パスワード"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="パスワード（8文字以上）"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="confirm-password" className="sr-only">
+                パスワード確認
+              </label>
+              <input
+                id="confirm-password"
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                required
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="パスワード確認"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
               />
             </div>
           </div>
@@ -154,17 +216,17 @@ const Login = () => {
                   処理中...
                 </span>
               ) : (
-                "ログイン"
+                "登録"
               )}
             </button>
           </div>
 
           <div className="text-sm text-center">
             <Link
-              to="/register"
+              to="/login"
               className="font-medium text-blue-600 hover:text-blue-500"
             >
-              アカウントをお持ちでない方はこちら
+              既にアカウントをお持ちの方はこちら
             </Link>
           </div>
         </form>
@@ -173,4 +235,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default Register;
